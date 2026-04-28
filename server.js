@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 const IMGBB_KEY = process.env.IMGBB_KEY || '7d5f38e0ab86c1663f6c2c296a66a13e';
-const META_BASE = 'https://graph.facebook.com/v19.0';
+const META_BASE = 'https://graph.facebook.com/v21.0'; // ✅ Versão atualizada
 
 // Health check
 app.get('/', (req, res) => res.json({ status: 'InstaMatrix Backend online ✅' }));
@@ -31,10 +31,8 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     const fileIsVideo = isVideo(req.file.mimetype, req.file.originalname);
 
     if (fileIsVideo) {
-      // Para vídeos, retorna o path local — será usado na rota /publish diretamente
       res.json({ localPath: req.file.path, isVideo: true, filename: req.file.filename });
     } else {
-      // Para imagens, sobe pro ImgBB
       const fileBuffer = fs.readFileSync(req.file.path);
       const base64 = fileBuffer.toString('base64');
       const fd = new FormData();
@@ -51,7 +49,6 @@ app.post('/upload', upload.single('file'), async (req, res) => {
 });
 
 // Publicar no Instagram (Feed, Story, Reels)
-// Para vídeos recebe multipart com o arquivo; para imagens recebe JSON com url
 app.post('/publish', upload.single('videoFile'), async (req, res) => {
   try {
     const { igid, token, mediaUrl, caption, type, storyLink, localPath } = req.body;
@@ -65,7 +62,6 @@ app.post('/publish', upload.single('videoFile'), async (req, res) => {
     let publicVideoUrl = null;
 
     if (videoLocalPath && fs.existsSync(videoLocalPath)) {
-      // Upload do vídeo direto para a Meta via resumable upload
       publicVideoUrl = await uploadVideoToMeta(igid, token, videoLocalPath);
     }
 
@@ -90,12 +86,10 @@ app.post('/publish', upload.single('videoFile'), async (req, res) => {
     const containerData = await containerRes.json();
     if (containerData.error) return res.status(400).json({ error: containerData.error.message });
 
-    // Aguarda processamento de vídeo
     if (type === 'reel' || (type === 'story' && publicVideoUrl)) {
       await waitForVideoReady(token, containerData.id);
     }
 
-    // Publica
     const publishParams = new URLSearchParams();
     publishParams.append('creation_id', containerData.id);
     publishParams.append('access_token', token);
@@ -103,7 +97,6 @@ app.post('/publish', upload.single('videoFile'), async (req, res) => {
     const publishData = await publishRes.json();
     if (publishData.error) return res.status(400).json({ error: publishData.error.message });
 
-    // Limpa arquivo temporário
     if (videoLocalPath && fs.existsSync(videoLocalPath)) fs.unlinkSync(videoLocalPath);
 
     res.json({ success: true, id: publishData.id });
@@ -112,13 +105,11 @@ app.post('/publish', upload.single('videoFile'), async (req, res) => {
   }
 });
 
-// Faz upload do vídeo para a Meta e retorna URL pública
 async function uploadVideoToMeta(igid, token, localPath) {
   const fileBuffer = fs.readFileSync(localPath);
   const fileSize = fileBuffer.length;
 
-  // Iniciar upload resumível
-  const initRes = await fetch(`https://rupload.facebook.com/video-upload/v19.0/${igid}/videos`, {
+  const initRes = await fetch(`https://rupload.facebook.com/video-upload/v21.0/${igid}/videos`, {
     method: 'POST',
     headers: {
       'Authorization': `OAuth ${token}`,
@@ -131,8 +122,7 @@ async function uploadVideoToMeta(igid, token, localPath) {
   });
   const initData = await initRes.json();
   if (initData.error) throw new Error('Erro no upload do vídeo: ' + initData.error.message);
-  // A Meta retorna o video_id que pode ser usado como video_url
-  return `https://rupload.facebook.com/video-upload/v19.0/${igid}/videos/${initData.h}`;
+  return `https://rupload.facebook.com/video-upload/v21.0/${igid}/videos/${initData.h}`;
 }
 
 async function waitForVideoReady(token, containerId, attempts = 24) {
